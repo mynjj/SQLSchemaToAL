@@ -11,7 +11,7 @@ if (-not( Test-Path -Path $InputSchema)) {
     exit
 }
 
-$schema = Get-Content $InputSchema
+[String] $schema =  (Get-Content $InputSchema)
 
 # if it's worth it, a proper SQL parser could be fitting and less error prone...
 
@@ -29,24 +29,29 @@ function SQLColTypeToAL($colty) {
     $t = $r.Matches($colty)
     $sqlType = $t[0].Groups['sqltype'].value.ToLower()
     $alType = "Unknown $sqlType"
+    $params = ""
     switch ($sqlType) {
         "int" { $alType = "Integer" }
         "smallint" { $alType = "Integer" }
         "tinyint" { $alType = "Integer" }
         "char" { $alType = "Text" }
-        "binary" { $alType = "Text" }
+        "binary" { 
+            $alType = "Text"
+            $params = "[50]"
+        }
         "numeric" { $alType = "Decimal" }
         "datetime" { $alType = "DateTime" }
     }
-    $params = ""
     $pr = [Regex]::new("\((?<paren>[^\)]*)\)")
     $x = $pr.Matches($colty)
 
     if ($x.Count -ne 0){
         $ps = $x[0].Groups['paren'].value.Split(",")
-        switch ($alType) {
-            "Text" {
-                $params = "[$($ps[0].Trim())]"
+        if ($params -eq ""){
+            switch ($alType) {
+                "Text" {
+                    $params = "[$($ps[0].Trim())]"
+                }
             }
         }
     }
@@ -58,12 +63,12 @@ $create = "$($(mLit create))${sf}$($(mLit table))"
 $tableid = "(?<tableid>[^\s\n\(]+)"
 $colid = "(?<colid>[a-zA-Z\d_\[\]]+)"
 $colty = "(?<colty>[a-zA-Z_\[\]]+($sf|(\($s\d+($s,$s\d+$s)*\))))"
+$coldefs = "(?<coldefs>($s$colid$sf$colty[^,]*,)*)"
+$primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\(]+\((?<colkey>[^\)]+)\)"
 
-$create_table_regex = [Regex]::new("$create$sf$tableid$s\((?<coldefs>($s$colid$sf$colty[^,]*,)*)")
+$create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
 
-$result = $create_table_regex.Matches($schema)
-
-function SQLTableToAL($tableid, $coldefs, $table_count){
+function SQLTableToAL($tableid, $tablecontent, $table_count){
     $ss = $tableid.Split(".")
     if($ss.Count -eq 1){
         $tableName = $ss[0]
@@ -77,7 +82,6 @@ function SQLTableToAL($tableid, $coldefs, $table_count){
     $baseName = "$Prefix$tableName"
     $filename = "$basename.Table.al"
 
-     
     $id = $StartId+$table_count
 
     $content = "table $id $basename `r"
@@ -85,10 +89,38 @@ function SQLTableToAL($tableid, $coldefs, $table_count){
     $content = "$content    DataClassification = CustomerContent;`r"
     $content = "$content    fields`r"
     $content = "$content    {`r"
+    $coldefs = $tablecontent.Split(",")
+    for($i = 0; $i -lt $coldefs.Count; $i++){
+        $fsttok = $coldefs[$i].Trim().Split(" ")[0]
+        if($fsttok.ToLower() -eq "constraint"){
+            Continue
+        }
+        $r = [Regex]::new("$s$colid$sf$colty[^,]")
+        $t = $r.Matches($coldefs[$i])
+        if($t.Count -eq 0){
+            Write-Host "-------"
+            Write-Host $coldefs[$i]
+            Continue
+        }
+        $colid = $t[0].Groups['colid'].value
+        $colty = $t[0].Groups['colty'].value
+
+        $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
+        $t = $r.Matches($colid)
+        $colName = $t[0].Groups['name'].value
+        $colType = SQLColTypeToAL $colty
+        $content = "$content        field($($i+1); $colname; $colType)`r"
+        $content = "$content        {`r"
+        $content = "$content            DataClassification = CustomerContent;`r"
+        $content = "$content        }`r"
+    }
+    $content = "$content    }`r"
+    <#
     $r = [Regex]::new("$s$colid$sf$colty[^,]*,")
-    $result = $r.Matches($coldefs)
+    $result = $r.Matches($tablecontent)
     for($i = 0; $i -lt $result.Count; $i++){
         $colid = $result[$i].Groups['colid'].value
+        Write-Host $colid
         $colty = $result[$i].Groups['colty'].value
         $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
         $t = $r.Matches($colid)
@@ -100,17 +132,60 @@ function SQLTableToAL($tableid, $coldefs, $table_count){
         $content = "$content        }`r"
     }
     $content = "$content    }`r"
-    $content = "$content}"
+    #>
+    $keysr = [Regex]::new($primkeys)
+    $result = $keysr.Matches($tablecontent)
+    if($result.Count -gt 0){
+        $content = "$content    keys`r"
+        $content = "$content    {`r"
+        for($i = 0; $i -lt $result.Count; $i++){
+            $keydef = $result[$i].Groups['colkey'].value
+            $keycolname = ($keydef.Trim() -replace "$sf"," ").Split()[0]
+            $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
+            $t = $r.Matches($keycolname)
+            $colname = $t[0].Groups['name'].value
+            $content = "$content        key(Key$($i+1); $colname)`r"
+            $content = "$content        {`r"
+            $content = "$content            Clustered = true;`r"
+            $content = "$content        }`r"
+        }
+        $content = "$content    }`r"
+    }
+    $content = "$content}`r"
     $content | Out-File -FilePath "$OutputFolder$filename"
 }
+
+$result = $create_table_regex.Matches($schema)
 
 if($result.Count -gt 0){
     for ($i = 0 ; $i -lt $result.Count; $i++){
         $tableid = $result[$i].Groups['tableid'].value
-        $coldefs = $result[$i].Groups['coldefs'].value
-        SQLTableToAL $tableid $coldefs $i
+        $afterMatch = ($result[$i].Index)+($result[$i].Length)
+        $contentIndex = $afterMatch
+        $parencount = 1
+        $innerLen = 0
+        while (($contentIndex -lt $schema.Length) -and ($parencount -gt 0)){
+            if ($schema[$contentIndex] -eq '('){
+                $parencount++
+            }
+            elseif ($schema[$contentIndex] -eq ')') {
+                $parencount--
+            }
+            $contentIndex++
+            $innerLen++
+        }
+        if($contentIndex -eq $schema.Length){
+            Write-Host "Unmatched parentheses after CREATE TABLE expression"
+            Exit
+        }
+        $tablecontent = $schema.Substring($afterMatch, $innerLen-1)
+        SQLTableToAL $tableid $tablecontent $i
     }
 }
 else {
     Write-Host "Unable to parse schema definitions"
 }
+
+<#
+$create_table_regex = [Regex]::new("$create$sf$tableid$s\($coldefs")
+#>
