@@ -133,16 +133,16 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $baseName = "$Prefix$tableName"
     $filename = "$basename.Table.al"
 
-    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, SourceTableName$tableName);`r"
-    $script:CodeunitTableNames = "$CodeunitTableNames        SourceTableName${tableName}: Label '$tableName', Locked = true;`r"
+    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, SourceTableName$tableName);`n"
+    $script:CodeunitTableNames = "$CodeunitTableNames        SourceTableName${tableName}: Label '$tableName', Locked = true;`n"
 
     $id = $StartId+$table_count
 
-    $content = "table $id $basename `r"
-    $content = "$content{`r"
-    $content = "$content    DataClassification = CustomerContent;`r"
-    $content = "$content    fields`r"
-    $content = "$content    {`r"
+    $content = "table $id $basename `n"
+    $content = "$content{`n"
+    $content = "$content    DataClassification = CustomerContent;`n"
+    $content = "$content    fields`n"
+    $content = "$content    {`n"
     
     $r = [Regex]::new("(?<constraint>,?$($(mLit constraint)))?$s$colid$sf$colty[^,]*,")
     $result = $r.Matches($tablecontent)
@@ -156,31 +156,31 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
         $t = $r.Matches($colid)
         $colName = $t[0].Groups['name'].value
         $colType = SQLColTypeToAL $colty
-        $content = "$content        field($($i+1); $colname; $colType)`r"
-        $content = "$content        {`r"
-        $content = "$content            DataClassification = CustomerContent;`r"
-        $content = "$content        }`r"
+        $content = "$content        field($($i+1); $colname; $colType)`n"
+        $content = "$content        {`n"
+        $content = "$content            DataClassification = CustomerContent;`n"
+        $content = "$content        }`n"
     }
-    $content = "$content    }`r"
+    $content = "$content    }`n"
     $keysr = [Regex]::new($primkeys)
     $result = $keysr.Matches($tablecontent)
     if($result.Count -gt 0){
-        $content = "$content    keys`r"
-        $content = "$content    {`r"
+        $content = "$content    keys`n"
+        $content = "$content    {`n"
         for($i = 0; $i -lt $result.Count; $i++){
             $keydef = $result[$i].Groups['colkey'].value
             $keycolname = ($keydef.Trim() -replace "$sf"," ").Split()[0]
             $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
             $t = $r.Matches($keycolname)
             $colname = $t[0].Groups['name'].value
-            $content = "$content        key(Key$($i+1); $colname)`r"
-            $content = "$content        {`r"
-            $content = "$content            Clustered = true;`r"
-            $content = "$content        }`r"
+            $content = "$content        key(Key$($i+1); $colname)`n"
+            $content = "$content        {`n"
+            $content = "$content            Clustered = true;`n"
+            $content = "$content        }`n"
         }
-        $content = "$content    }`r"
+        $content = "$content    }`n"
     }
-    $content = "$content}`r"
+    $content = "$content}`n"
     $content | Out-File -FilePath "$OutputFolder$filename"
 }
 
