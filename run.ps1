@@ -5,7 +5,7 @@ param (
 
 if($Test){
     Remove-Item .\test\output\*
-    .\SQLSchema-To-AL.ps1 .\test\sample-input.sql -OutputFolder .\test\output\
+    .\SQLSchema-To-AL.ps1 .\test\sample-input.sql -OutputFolder .\test\output\ -GenMappingCodeunit
 
     Get-ChildItem -Filter *.al .\test\expected-output |
     ForEach-Object {
@@ -14,8 +14,6 @@ if($Test){
 
         if(($expectedContent -replace "(\s|\n|\t)+","") -ne ($actualContent -replace "(\s|\n|\t)+","")){
             Write-Host "Test failed for $($_.Name)"
-            Write-Host ($expectedContent -replace "(\s|\n|\t)+","")
-            Write-Host ($actualContent -replace "(\s|\n|\t)+","")
             Exit
         }
     }

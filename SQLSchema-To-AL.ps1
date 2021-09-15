@@ -1,8 +1,28 @@
+<#
+.Description
+Takes an SQL schema definition and generates the appropriate AL files
+
+.Parameter InputSchema
+File path of the SQL schema definition
+.Parameter Prefix
+Prefix to add to the AL table definitions
+.Parameter StartId
+Starting ID for the AL table definitions
+.Parameter OutputFolder
+Folder where the generated AL files will be stored
+.Parameter GenMappingCodeunit
+Switch to generate the mapping codeunit
+.Parameter MappingCodeunitId
+ID given to the codeunit object
+
+#>
 param (
     [Parameter(Mandatory=$true)][string]$InputSchema,
     [string]$Prefix = 'MSFT',
     [int]$StartId = 50000,
-    [string]$OutputFolder = ''
+    [string]$OutputFolder = '',
+    [switch]$GenMappingCodeunit,
+    [int]$MappingCodeunitId = 57000
 )
 
 
@@ -12,6 +32,35 @@ if (-not( Test-Path -Path $InputSchema)) {
 }
 
 [String] $schema =  (Get-Content $InputSchema)
+
+$mappingCodeunit = @"
+codeunit CODEUNITID "CODEUNITNAME"
+{
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"Hybrid Cloud Management", 'OnInsertDefaultTableMappings', '', false, false)]
+    local procedure OnInsertDefaultTableMappings(DeleteExisting: Boolean; ProductID: Text[250])
+    begin
+UPDATEORINSERTMAPPINGS
+    end;
+
+    local procedure UpdateOrInsertRecord(TableID: Integer; SourceTableName: Text)
+    var
+        MigrationTableMapping: Record "Migration Table Mapping";
+    begin
+        if MigrationTableMapping.Get(ApplicationIdentifier(), TableID) then
+            MigrationTableMapping.Delete();
+
+
+
+        MigrationTableMapping."App ID" := ApplicationIdentifier();
+        MigrationTableMapping.Validate("Table ID", TableID);
+        MigrationTableMapping."Source Table Name" := SourceTableName;
+        MigrationTableMapping.Insert();
+    end;
+
+    var
+MAPPINGTABLENAMES
+}
+"@
 
 # if it's worth it, a proper SQL parser could be fitting and less error prone...
 
@@ -67,6 +116,9 @@ $primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\
 
 $create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
 
+$script:CodeunitMappings = ""
+$script:CodeunitTableNames = ""
+
 function SQLTableToAL($tableid, $tablecontent, $table_count){
     $ss = $tableid.Split(".")
     if($ss.Count -eq 1){
@@ -80,6 +132,9 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $tableName = $result[0].Groups['name'].value
     $baseName = "$Prefix$tableName"
     $filename = "$basename.Table.al"
+
+    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, SourceTableName$tableName);`r"
+    $script:CodeunitTableNames = "$CodeunitTableNames        SourceTableName${tableName}: Label '$tableName', Locked = true;`r"
 
     $id = $StartId+$table_count
 
@@ -154,6 +209,13 @@ if($result.Count -gt 0){
         }
         $tablecontent = $schema.Substring($afterMatch, $innerLen-1)
         SQLTableToAL $tableid $tablecontent $i
+    }
+    if ($GenMappingCodeunit) {
+        $codeunit = $mappingCodeunit -replace "CODEUNITID",$MappingCodeunitId
+        $codeunit = $codeunit -replace "CODEUNITNAME","$Prefix - Default table mapping"
+        $codeunit = $codeunit -replace "UPDATEORINSERTMAPPINGS",$script:CodeunitMappings
+        $codeunit = $codeunit -replace "MAPPINGTABLENAMES",$script:CodeunitTableNames
+        $codeunit | Out-File -FilePath "$OutputFolder${Prefix}DefaultTableMapping.Codeunit.al"
     }
 }
 else {
