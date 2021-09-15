@@ -63,7 +63,6 @@ $create = "$($(mLit create))${sf}$($(mLit table))"
 $tableid = "(?<tableid>[^\s\n\(]+)"
 $colid = "(?<colid>[a-zA-Z\d_\[\]]+)"
 $colty = "(?<colty>[a-zA-Z_\[\]]+($sf|(\($s\d+($s,$s\d+$s)*\))))"
-$coldefs = "(?<coldefs>($s$colid$sf$colty[^,]*,)*)"
 $primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\(]+\((?<colkey>[^\)]+)\)"
 
 $create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
@@ -89,38 +88,14 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $content = "$content    DataClassification = CustomerContent;`r"
     $content = "$content    fields`r"
     $content = "$content    {`r"
-    $coldefs = $tablecontent.Split(",")
-    for($i = 0; $i -lt $coldefs.Count; $i++){
-        $fsttok = $coldefs[$i].Trim().Split(" ")[0]
-        if($fsttok.ToLower() -eq "constraint"){
-            Continue
-        }
-        $r = [Regex]::new("$s$colid$sf$colty[^,]")
-        $t = $r.Matches($coldefs[$i])
-        if($t.Count -eq 0){
-            Write-Host "-------"
-            Write-Host $coldefs[$i]
-            Continue
-        }
-        $colid = $t[0].Groups['colid'].value
-        $colty = $t[0].Groups['colty'].value
-
-        $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
-        $t = $r.Matches($colid)
-        $colName = $t[0].Groups['name'].value
-        $colType = SQLColTypeToAL $colty
-        $content = "$content        field($($i+1); $colname; $colType)`r"
-        $content = "$content        {`r"
-        $content = "$content            DataClassification = CustomerContent;`r"
-        $content = "$content        }`r"
-    }
-    $content = "$content    }`r"
-    <#
-    $r = [Regex]::new("$s$colid$sf$colty[^,]*,")
+    
+    $r = [Regex]::new("(?<constraint>,?$($(mLit constraint)))?$s$colid$sf$colty[^,]*,")
     $result = $r.Matches($tablecontent)
     for($i = 0; $i -lt $result.Count; $i++){
+        if ($result[$i].Groups['constraint'].Success) {
+            Continue
+        }
         $colid = $result[$i].Groups['colid'].value
-        Write-Host $colid
         $colty = $result[$i].Groups['colty'].value
         $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
         $t = $r.Matches($colid)
@@ -132,7 +107,6 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
         $content = "$content        }`r"
     }
     $content = "$content    }`r"
-    #>
     $keysr = [Regex]::new($primkeys)
     $result = $keysr.Matches($tablecontent)
     if($result.Count -gt 0){
@@ -185,7 +159,3 @@ if($result.Count -gt 0){
 else {
     Write-Host "Unable to parse schema definitions"
 }
-
-<#
-$create_table_regex = [Regex]::new("$create$sf$tableid$s\($coldefs")
-#>
