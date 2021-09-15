@@ -1,4 +1,4 @@
-table 50313 MSFTGL00100
+table 50000 MSFTGL00100
 {
     DataClassification = CustomerContent;
 

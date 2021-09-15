@@ -1,7 +1,7 @@
 param (
     [Parameter(Mandatory=$true)][string]$InputSchema,
     [string]$Prefix = 'MSFT',
-    [int]$StartId = 5000,
+    [int]$StartId = 50000,
     [string]$OutputFolder = ''
 )
 
@@ -33,7 +33,7 @@ function SQLColTypeToAL($colty) {
     switch ($sqlType) {
         "int" { $alType = "Integer" }
         "smallint" { $alType = "Integer" }
-        "tinyint" { $alType = "Integer" }
+        "tinyint" { $alType = "Boolean" }
         "char" { $alType = "Text" }
         "binary" { 
             $alType = "Text"
