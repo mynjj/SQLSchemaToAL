@@ -73,11 +73,9 @@ function mLit($w) {
     return "($l|$u)"`
 }
 
-function SQLColTypeToAL($colty) {
-    $r = [Regex]::new("\[?(?<sqltype>[^\[\]]+)\]?")
-    $t = $r.Matches($colty)
-    $sqlType = $t[0].Groups['sqltype'].value.ToLower()
-    $alType = "Unknown $sqlType"
+function SQLColTypeToAL($c) {
+    $sqlType = (fromBrackets $c).ToLower()
+    $alType = "UNKNOWN"
     $params = ""
     switch ($sqlType) {
         "int" { $alType = "Integer" }
@@ -92,7 +90,7 @@ function SQLColTypeToAL($colty) {
         "datetime" { $alType = "DateTime" }
     }
     $pr = [Regex]::new("\((?<paren>[^\)]*)\)")
-    $x = $pr.Matches($colty)
+    $x = $pr.Matches($c)
 
     if ($x.Count -ne 0){
         $ps = $x[0].Groups['paren'].value.Split(",")
@@ -111,14 +109,51 @@ function SQLColTypeToAL($colty) {
 $create = "$($(mLit create))${sf}$($(mLit table))"
 $tableid = "(?<tableid>[^\s\n\(]+)"
 $colid = "(?<colid>[a-zA-Z\d_\[\]]+)"
-$colty = "(?<colty>[a-zA-Z_\[\]]+($sf|(\($s\d+($s,$s\d+$s)*\))))"
-$primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\(]+\((?<colkey>[^\)]+)\)"
+$colty = "(?<colty>[a-zA-Z_\[\]]+($sf|(\($s[a-zA-Z\d]+($s,$s[a-zA-Z\d]+$s)*\))))"
+$primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\(]+\((?<colkeys>[^\)]+)\)"
 
 $create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
 
 $script:CodeunitMappings = ""
 $script:CodeunitTableNames = ""
 
+function fromBrackets($v){
+    $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
+    $t = $r.Matches($v)
+    return $t[0].Groups['name'].value
+}
+function splitCommaParams($tablecontent){
+    $i = 0
+    $pCount = 0
+    $bCount = 0
+    $current = ''
+    $params = @()
+    for ($i = 0; $i -lt $tablecontent.Length; $i++){
+        $c = $tablecontent[$i]
+        if(($c -eq ',') -and ($pCount -eq 0) -and ($bCount -eq 0)){
+            $params += $current
+            $current = ''
+            Continue
+        }
+        if($c -eq '('){
+            $pCount++
+        }
+        elseif($c -eq '[') {
+            $bCount++
+        }
+        elseif($c -eq ')'){
+            $pCount--
+        }
+        elseif($c -eq ']'){
+            $bCount--
+        }
+        $current += $c
+    }
+    if($current -ne ''){
+        $params += $current
+    }
+    return $params
+}
 function SQLTableToAL($tableid, $tablecontent, $table_count){
     $ss = $tableid.Split(".")
     if($ss.Count -eq 1){
@@ -144,39 +179,58 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $content = "$content    fields`n"
     $content = "$content    {`n"
     
-    $r = [Regex]::new("(?<constraint>,?$($(mLit constraint)))?$s$colid$sf$colty[^,]*,")
-    $result = $r.Matches($tablecontent)
-    for($i = 0; $i -lt $result.Count; $i++){
-        if ($result[$i].Groups['constraint'].Success) {
+    $keyscontent = @()
+
+    $tableParams = splitCommaParams $tablecontent
+    for($i = 0; $i -lt $tableParams.Count; $i++){
+        [String] $p = $tableParams[$i]
+        $fstword = $p.Trim().Split(' ')[0]
+        if($fstword -match (mLit constraint)){
+            # process constraint
+            $keysr = [Regex]::new($primkeys)
+            $result = $keysr.Matches($p)
+            if($result.Count -eq 0){
+                Write-Host "Unrecognized constraint $p"
+                Continue
+            }
+
+            $keydefs = $result[0].Groups['colkeys'].value.Split(",")
+            for($j = 0; $j -lt $keydefs.Count; $j++){
+                $keydef = $keydefs[$j]
+                $keycolname = fromBrackets ($keydef.Trim() -replace "$sf"," ").Split()[0]
+                $kc = "        key(Key<INDEX>; $keycolname)`n"
+                $kc = "$kc        {`n"
+                $kc = "$kc            Clustered = true;`n"
+                $kc = "$kc        }`n"
+                $keyscontent += $kc
+            }
             Continue
         }
-        $colid = $result[$i].Groups['colid'].value
-        $colty = $result[$i].Groups['colty'].value
-        $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
-        $t = $r.Matches($colid)
-        $colName = $t[0].Groups['name'].value
-        $colType = SQLColTypeToAL $colty
+        # process column definition
+        $r = [Regex]::new("$s$colid$sf$colty")
+        $t = $r.Matches($p)
+        if($t.Count -eq 0){
+            Write-Host "Unrecognized column definition '$p'. For table $tableName"
+            Continue
+        }
+        $colname = fromBrackets ($t[0].Groups['colid'].value)
+        $alcolty = $t[0].Groups['colty'].value
+        $colType = SQLColTypeToAL $alcolty
+        if($colType -eq "UNKNOWN"){
+            Write-Host "Unkown column type $alcolty on table $tableName."
+        }
         $content = "$content        field($($i+1); $colname; $colType)`n"
         $content = "$content        {`n"
         $content = "$content            DataClassification = CustomerContent;`n"
         $content = "$content        }`n"
     }
     $content = "$content    }`n"
-    $keysr = [Regex]::new($primkeys)
-    $result = $keysr.Matches($tablecontent)
-    if($result.Count -gt 0){
+    if($keyscontent.Count -gt 0){
         $content = "$content    keys`n"
         $content = "$content    {`n"
-        for($i = 0; $i -lt $result.Count; $i++){
-            $keydef = $result[$i].Groups['colkey'].value
-            $keycolname = ($keydef.Trim() -replace "$sf"," ").Split()[0]
-            $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
-            $t = $r.Matches($keycolname)
-            $colname = $t[0].Groups['name'].value
-            $content = "$content        key(Key$($i+1); $colname)`n"
-            $content = "$content        {`n"
-            $content = "$content            Clustered = true;`n"
-            $content = "$content        }`n"
+        for ($i = 0; $i -lt $keyscontent.Count; $i++) {
+            $kdef = $keyscontent[$i] -replace "<INDEX>","$($i+1)"
+            $content = "$content$kdef"
         }
         $content = "$content    }`n"
     }
