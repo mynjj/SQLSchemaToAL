@@ -88,6 +88,19 @@ function SQLColTypeToAL($c) {
         }
         "numeric" { $alType = "Decimal" }
         "datetime" { $alType = "DateTime" }
+        "text" {
+            $alType = "Text"
+            $params = "[2048]"
+        }
+        "ntext" {
+            $alType = "Text"
+            $params = "[2048]"
+        }
+        "image" {
+            $alType = "Blob"
+        }
+        "varbinary"{ $alType = "Blob" }
+        "varchar" { $alType = "Text" }
     }
     $pr = [Regex]::new("\((?<paren>[^\)]*)\)")
     $x = $pr.Matches($c)
@@ -99,6 +112,7 @@ function SQLColTypeToAL($c) {
                 "Text" {
                     $params = "[$($ps[0].Trim())]"
                 }
+                "Blob" {$params = ""}
             }
         }
     }
@@ -126,13 +140,13 @@ function splitCommaParams($tablecontent){
     $i = 0
     $pCount = 0
     $bCount = 0
-    $current = ''
+    $current = "" 
     $params = @()
     for ($i = 0; $i -lt $tablecontent.Length; $i++){
         $c = $tablecontent[$i]
         if(($c -eq ',') -and ($pCount -eq 0) -and ($bCount -eq 0)){
             $params += $current
-            $current = ''
+            $current = ""
             Continue
         }
         if($c -eq '('){
@@ -182,6 +196,9 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $keyscontent = @()
 
     $tableParams = splitCommaParams $tablecontent
+    if($tableParams.Count -eq 1){
+        $tableParams = @($tableParams)
+    }
     for($i = 0; $i -lt $tableParams.Count; $i++){
         [String] $p = $tableParams[$i]
         $fstword = $p.Trim().Split(' ')[0]
