@@ -215,11 +215,11 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
             for($j = 0; $j -lt $keydefs.Count; $j++){
                 $keydef = $keydefs[$j]
                 $keycolname = fromBrackets ($keydef.Trim() -replace "$sf"," ").Split()[0]
-                $kc = "        key(Key<INDEX>; $keycolname)`n"
-                $kc = "$kc        {`n"
-                $kc = "$kc            Clustered = true;`n"
-                $kc = "$kc        }`n"
-                $keyscontent += $kc
+                #$kc = "        key(Key<INDEX>; $keycolname)`n"
+                #$kc = "$kc        {`n"
+                #$kc = "$kc            Clustered = true;`n"
+                #$kc = "$kc        }`n"
+                $keyscontent += $keycolname
             }
             Continue
         }
@@ -243,12 +243,20 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     }
     $content = "$content    }`n"
     if($keyscontent.Count -gt 0){
+        $ks = $keyscontent -join ","
         $content = "$content    keys`n"
         $content = "$content    {`n"
+        $content = "$content        key(Key1; $ks)`n"
+        $content = "$content        {`n"
+        $content = "$content            Clustered = true;`n"
+        $content = "$content        }`n"
+
+        <#
         for ($i = 0; $i -lt $keyscontent.Count; $i++) {
             $kdef = $keyscontent[$i] -replace "<INDEX>","$($i+1)"
             $content = "$content$kdef"
         }
+        #>
         $content = "$content    }`n"
     }
     $content = "$content}`n"
