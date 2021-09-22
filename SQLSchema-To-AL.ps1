@@ -56,9 +56,6 @@ UPDATEORINSERTMAPPINGS
         MigrationTableMapping."Source Table Name" := SourceTableName;
         MigrationTableMapping.Insert();
     end;
-
-    var
-MAPPINGTABLENAMES
 }
 "@
 
@@ -129,7 +126,6 @@ $primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\
 $create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
 
 $script:CodeunitMappings = ""
-$script:CodeunitTableNames = ""
 
 function fromBrackets($v){
     $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
@@ -182,8 +178,7 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $baseName = "$Prefix$tableName"
     $filename = "$basename.Table.al"
 
-    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, SourceTableName$tableName);`n"
-    $script:CodeunitTableNames = "$CodeunitTableNames        SourceTableName${tableName}: Label '$tableName', Locked = true;`n"
+    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, '$tableName');`n"
 
     $id = $StartId+$table_count
 
@@ -215,10 +210,6 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
             for($j = 0; $j -lt $keydefs.Count; $j++){
                 $keydef = $keydefs[$j]
                 $keycolname = fromBrackets ($keydef.Trim() -replace "$sf"," ").Split()[0]
-                #$kc = "        key(Key<INDEX>; $keycolname)`n"
-                #$kc = "$kc        {`n"
-                #$kc = "$kc            Clustered = true;`n"
-                #$kc = "$kc        }`n"
                 $keyscontent += $keycolname
             }
             Continue
@@ -250,13 +241,6 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
         $content = "$content        {`n"
         $content = "$content            Clustered = true;`n"
         $content = "$content        }`n"
-
-        <#
-        for ($i = 0; $i -lt $keyscontent.Count; $i++) {
-            $kdef = $keyscontent[$i] -replace "<INDEX>","$($i+1)"
-            $content = "$content$kdef"
-        }
-        #>
         $content = "$content    }`n"
     }
     $content = "$content}`n"
@@ -293,7 +277,6 @@ if($result.Count -gt 0){
         $codeunit = $mappingCodeunit -replace "CODEUNITID",$MappingCodeunitId
         $codeunit = $codeunit -replace "CODEUNITNAME","$Prefix - Default table mapping"
         $codeunit = $codeunit -replace "UPDATEORINSERTMAPPINGS",$script:CodeunitMappings
-        $codeunit = $codeunit -replace "MAPPINGTABLENAMES",$script:CodeunitTableNames
         $codeunit | Out-File -FilePath "$OutputFolder${Prefix}DefaultTableMapping.Codeunit.al"
     }
 }

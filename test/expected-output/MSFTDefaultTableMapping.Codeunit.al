@@ -3,10 +3,8 @@ codeunit 57000 "MSFT - Default table mapping"
     [EventSubscriber(ObjectType::Codeunit, Codeunit::"Hybrid Cloud Management", 'OnInsertDefaultTableMappings', '', false, false)]
     local procedure OnInsertDefaultTableMappings(DeleteExisting: Boolean; ProductID: Text[250])
     begin
-        UpdateOrInsertRecord(Database::MSFTGL00100, SourceTableNameGL00100);
+        UpdateOrInsertRecord(Database::MSFTGL00100, 'GL00100');
     end;
-
-
 
     local procedure UpdateOrInsertRecord(TableID: Integer; SourceTableName: Text)
     var
@@ -25,6 +23,4 @@ codeunit 57000 "MSFT - Default table mapping"
 
 
 
-    var
-        SourceTableNameGL00100: Label 'GL00100', Locked = true;
 }
