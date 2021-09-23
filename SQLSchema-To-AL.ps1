@@ -14,6 +14,8 @@ Folder where the generated AL files will be stored
 Switch to generate the mapping codeunit
 .Parameter MappingCodeunitId
 ID given to the codeunit object
+.Parameter GenSQLStatsQuery
+Switch to generate the SQL stats query
 
 #>
 param (
@@ -22,7 +24,8 @@ param (
     [int]$StartId = 50000,
     [string]$OutputFolder = '',
     [switch]$GenMappingCodeunit,
-    [int]$MappingCodeunitId = 57000
+    [int]$MappingCodeunitId = 57000,
+    [switch]$GenSQLStatsQuery
 )
 
 
@@ -126,6 +129,7 @@ $primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\
 $create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
 
 $script:CodeunitMappings = ""
+$script:SQLStatsQ = @()
 
 function fromBrackets($v){
     $r = [Regex]::new("\[?(?<name>[^\[\]]+)\]?")
@@ -178,7 +182,6 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $baseName = "$Prefix$tableName"
     $filename = "$basename.Table.al"
 
-    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, '$tableName');`n"
 
     $id = $StartId+$table_count
 
@@ -243,10 +246,23 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
         $content = "$content        }`n"
         $content = "$content    }`n"
     }
+    else {
+        Write-Host "Table $tableName without keys definition. Ignoring."
+        return
+    }
     $content = "$content}`n"
     $content | Out-File -FilePath "$OutputFolder$filename"
+    $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, '$tableName');`n"
+    $script:SQLStatsQ += "SELECT '$tableName', COUNT(*) from $tableName"
+    return
 }
 
+
+$use_DB_regex = "$($(mLit use))$sf(?<dbname>[a-zA-Z0-9_\-\[\]]+)"
+$hasDBName = $schema -match $use_DB_regex
+if($hasDBName){
+    $dbname = fromBrackets $matches['dbname']
+}
 $result = $create_table_regex.Matches($schema)
 
 if($result.Count -gt 0){
@@ -278,6 +294,17 @@ if($result.Count -gt 0){
         $codeunit = $codeunit -replace "CODEUNITNAME","$Prefix - Default table mapping"
         $codeunit = $codeunit -replace "UPDATEORINSERTMAPPINGS",$script:CodeunitMappings
         $codeunit | Out-File -FilePath "$OutputFolder${Prefix}DefaultTableMapping.Codeunit.al"
+    }
+    if ($GenSQLStatsQuery) {
+        $sqlscript = "use $dbname`n"
+        $sqlscript = "${sqlscript}declare @stats table (tbl varchar(255), nrecords int);`n"
+        $sqlscript = "${sqlscript}insert into @stats`n"
+
+        $x = $script:SQLStatsQ -join "`nunion`n"
+        $sqlscript = "$sqlscript$x;"
+        $sqlscript = "${sqlscript}`nselect * from @stats;`n"
+        $sqlscript = "${sqlscript}select * from @stats where nrecords=0;`n"
+        $sqlscript | Out-File -FilePath "${OutputFolder}stats.sql"
     }
 }
 else {
