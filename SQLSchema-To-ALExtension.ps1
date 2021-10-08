@@ -1,6 +1,7 @@
 <#
 .Description
-Takes an SQL schema definition and generates the appropriate AL files
+Takes an SQL schema definition and generates the appropriate files to have this as a BC extension that can have its data imported by Cloud Migration.
+Requires the folder `stubs` to be on the same path.
 
 .Parameter InputSchema
 File path of the SQL schema definition
@@ -9,10 +10,12 @@ Prefix to add to the AL table definitions
 .Parameter StartId
 Starting ID for the AL table definitions
 .Parameter OutputFolder
-Folder where the generated AL files will be stored
-.Parameter GenMappingCodeunit
-Switch to generate the mapping codeunit
-.Parameter MappingCodeunitId
+Folder where files will be generated
+.Parameter ExtensionName
+Name for the extension.
+.Parameter TablesSubfolder
+Name of the folder where AL table files will be stored on the extension.
+.Parameter StartCodeunitsId
 ID given to the codeunit object
 .Parameter GenSQLStatsQuery
 Switch to generate the SQL stats query
@@ -23,8 +26,9 @@ param (
     [string]$Prefix = 'MSFT',
     [int]$StartId = 50000,
     [string]$OutputFolder = '',
-    [switch]$GenMappingCodeunit,
-    [int]$MappingCodeunitId = 57000,
+    [string]$ExtensionName = '',
+    [string]$TablesSubfolder = '',
+    [int]$StartCodeunitsId = 57000,
     [switch]$GenSQLStatsQuery
 )
 
@@ -33,6 +37,26 @@ if (-not( Test-Path -Path $InputSchema)) {
     Write-Host "Input schema doesn't exist."
     exit
 }
+if (-not( Test-Path -Path $OutputFolder)){
+    Write-Host "Output folder doesn't exist."
+    exit
+}
+
+$extensionFolder = $OutputFolder
+if($extensionFolder -ne ''){
+    $extensionFolder += '\'
+}
+if($ExtensionName -ne ''){
+    $extensionFolder += "$ExtensionName\"
+}
+
+$tablesFolder = "${extensionFolder}$TablesSubfolder\"
+
+if(Test-Path $extensionFolder){
+    Remove-Item $extensionFolder
+}
+New-Item -Path $extensionFolder -Type Directory
+New-Item -Path $tablesFolder -Type Directory
 
 [String] $schema =  (Get-Content $InputSchema)
 
@@ -48,18 +72,41 @@ UPDATEORINSERTMAPPINGS
     local procedure UpdateOrInsertRecord(TableID: Integer; SourceTableName: Text)
     var
         MigrationTableMapping: Record "Migration Table Mapping";
+        CurrentModuleInfo:  ModuleInfo;
     begin
-        if MigrationTableMapping.Get(ApplicationIdentifier(), TableID) then
+        NavApp.GetCurrentModuleInfo(CurrentModuleInfo);
+        if MigrationTableMapping.Get(CurrentModuleInfo.Id(), TableID) then
             MigrationTableMapping.Delete();
 
-
-
-        MigrationTableMapping."App ID" := ApplicationIdentifier();
+        MigrationTableMapping."App ID" := CurrentModuleInfo.Id();
         MigrationTableMapping.Validate("Table ID", TableID);
         MigrationTableMapping."Source Table Name" := SourceTableName;
         MigrationTableMapping.Insert();
     end;
 }
+"@
+
+$permissionsXML = @"
+<?xml version="1.0" encoding="utf-8"?>
+<PermissionSets>
+  <PermissionSet RoleID="EXTENSIONNAMEHERE" RoleName="EXTENSIONNAMEHERE">
+PERMISSIONSHERE
+  </PermissionSet>
+</PermissionSets>
+"@
+
+$script:permissionsXMLList = @()
+$permissionXML = @"
+    <Permission>
+      <ObjectType>OBJECTTYPEHERE</ObjectType>
+      <ObjectID>OBJECTIDHERE</ObjectID>
+      <ReadPermission>Yes</ReadPermission>
+      <InsertPermission>Yes</InsertPermission>
+      <ModifyPermission>Yes</ModifyPermission>
+      <DeletePermission>Yes</DeletePermission>
+      <ExecutePermission>Yes</ExecutePermission>
+      <SecurityFilter />
+    </Permission>
 "@
 
 # if it's worth it, a proper SQL parser could be fitting and less error prone...
@@ -126,7 +173,7 @@ $colid = "(?<colid>[a-zA-Z\d_\[\]]+)"
 $colty = "(?<colty>[a-zA-Z_\[\]]+($sf|(\($s[a-zA-Z\d]+($s,$s[a-zA-Z\d]+$s)*\))))"
 $primkeys = "$($(mLit constraint))$sf.+$($(mLit primary))$sf$($(mLit key))$sf[^\(]+\((?<colkeys>[^\)]+)\)"
 
-$create_table_regex = [Regex]::new("$create$sf$tableid$s\(")
+$createTableRegex = [Regex]::new("$create$sf$tableid$s\(")
 
 $script:CodeunitMappings = ""
 $script:SQLStatsQ = @()
@@ -168,7 +215,7 @@ function splitCommaParams($tablecontent){
     }
     return $params
 }
-function SQLTableToAL($tableid, $tablecontent, $table_count){
+function SQLTableToAL($tableid, $tablecontent, $tableCount){
     $ss = $tableid.Split(".")
     if($ss.Count -eq 1){
         $tableName = $ss[0]
@@ -183,7 +230,11 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
     $filename = "$basename.Table.al"
 
 
-    $id = $StartId+$table_count
+    $id = $StartId+$tableCount
+
+    $pxml = $permissionXML -replace "OBJECTTYPEHERE","TableData"
+    $pxml = $pxml -replace "OBJECTIDHERE",$id
+    $script:permissionsXMLList += $pxml
 
     $content = "table $id $basename `n"
     $content = "$content{`n"
@@ -251,19 +302,19 @@ function SQLTableToAL($tableid, $tablecontent, $table_count){
         return
     }
     $content = "$content}`n"
-    $content | Out-File -FilePath "$OutputFolder$filename"
+    $content | Out-File -FilePath "$tablesFolder$filename"
     $script:CodeunitMappings = "$CodeunitMappings        UpdateOrInsertRecord(Database::$baseName, '$tableName');`n"
     $script:SQLStatsQ += "SELECT '$tableName', COUNT(*) from $tableName"
     return
 }
 
-
-$use_DB_regex = "$($(mLit use))$sf(?<dbname>[a-zA-Z0-9_\-\[\]]+)"
-$hasDBName = $schema -match $use_DB_regex
+$useDBregex = "$($(mLit use))$sf(?<dbname>[a-zA-Z0-9_\-\[\]]+)"
+$hasDBName = $schema -match $useDBregex
 if($hasDBName){
     $dbname = fromBrackets $matches['dbname']
 }
-$result = $create_table_regex.Matches($schema)
+$result = $createTableRegex.Matches($schema)
+
 
 if($result.Count -gt 0){
     for ($i = 0 ; $i -lt $result.Count; $i++){
@@ -289,12 +340,21 @@ if($result.Count -gt 0){
         $tablecontent = $schema.Substring($afterMatch, $innerLen-1)
         SQLTableToAL $tableid $tablecontent $i
     }
-    if ($GenMappingCodeunit) {
-        $codeunit = $mappingCodeunit -replace "CODEUNITID",$MappingCodeunitId
-        $codeunit = $codeunit -replace "CODEUNITNAME","$Prefix - Default table mapping"
-        $codeunit = $codeunit -replace "UPDATEORINSERTMAPPINGS",$script:CodeunitMappings
-        $codeunit | Out-File -FilePath "$OutputFolder${Prefix}DefaultTableMapping.Codeunit.al"
-    }
+
+    $cId = $StartCodeunitsId;
+    $codeunit = $mappingCodeunit -replace "CODEUNITID",$cId
+    $mappingName = "$Prefix - Default table mapping"
+    $codeunit = $codeunit -replace "CODEUNITNAME",$mappingName
+    $codeunit = $codeunit -replace "UPDATEORINSERTMAPPINGS",$script:CodeunitMappings
+    $codeunit | Out-File -FilePath "$extensionFolder${Prefix}DefaultTableMapping.Codeunit.al"
+    $pxml = $permissionXML -replace "OBJECTTYPEHERE","Codeunit"
+    $pxml = $pxml -replace "OBJECTIDHERE",$cId
+    $script:permissionsXMLList += $pxml
+    $cId += 1
+
+    $permissionsContent = $permissionsXML -replace "PERMISSIONSHERE",($script:permissionsXMLList -join "`n") 
+    $permissionsContent -replace "EXTENSIONNAMEHERE",$ExtensionName | Out-File -FilePath "$extensionFolder\Permissions.xml"
+
     if ($GenSQLStatsQuery) {
         $sqlscript = "use $dbname`n"
         $sqlscript = "${sqlscript}declare @stats table (tbl varchar(255), nrecords int);`n"

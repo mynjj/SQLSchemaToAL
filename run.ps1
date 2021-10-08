@@ -1,21 +1,11 @@
 param (
-    [switch] $Test
+    [switch] $GPExample
 )
 
-
-if($Test){
-    Remove-Item .\test\output\*
-    .\SQLSchema-To-AL.ps1 .\test\sample-input.sql -OutputFolder .\test\output\ -GenMappingCodeunit
-
-    Get-ChildItem -Filter *.al .\test\expected-output |
-    ForEach-Object {
-        [String] $expectedContent = Get-Content $_.FullName
-        [String] $actualContent = Get-Content ".\test\output\$($_.Name)"
-
-        if(($expectedContent -replace "(\s|\n|\t)+","") -ne ($actualContent -replace "(\s|\n|\t)+","")){
-            Write-Host "Test failed for $($_.Name)"
-            Exit
-        }
+if($GPExample){
+    if(-not( Test-Path -Path 'examples\GP-TWO\')){
+        New-Item -Path 'examples\GP-TWO' -Type Directory
     }
-    Write-Host "Tests successful"
+
+    .\SQLSchema-To-ALExtension.ps1 .\examples\GP-TWO-schema.sql -OutputFolder .\examples\GP-TWO\ -ExtensionName ExtendGPMigration -TablesSubfolder GPTables -GenSQLStatsQuery
 }
